@@ -14,9 +14,9 @@ Type-safe event bus for Swift, built on Combine. A modern replacement for Notifi
 
 ## Requirements
 
-- iOS 13.0+ / macOS 10.15+ / tvOS 13.0+ / watchOS 6.0+
-- Xcode 12.0+
-- Swift 5.3+
+- iOS 17.0+ / macOS 15.0+ / tvOS 17.0+ / watchOS 10.0+
+- Xcode 15.0+
+- Swift 5.9+
 
 ## Installation
 
@@ -50,11 +50,11 @@ struct UserLoggedInEvent {
 }
 
 // Post events from anywhere
-let eventBus = EventBus.shared
-eventBus.post(UserLoggedInEvent(userId: "123", timestamp: .now))
+let bus = CombineBus.shared
+bus.post(UserLoggedInEvent(userId: "123", timestamp: .now))
 
 // Subscribe to events
-let cancellable = eventBus.onMainThread(UserLoggedInEvent.self) { event in
+let cancellable = bus.onMainThread(UserLoggedInEvent.self) { event in
     print("User logged in: \(event.userId)")
 }
 ```
@@ -70,7 +70,7 @@ struct ContentView: View {
     
     var body: some View {
         Text(message)
-            .onEvent(UserLoggedInEvent.self) { event in
+            .onCombineBus(UserLoggedInEvent.self) { event in
                 message = "User \(event.userId) logged in"
             }
     }
@@ -81,17 +81,17 @@ struct ContentView: View {
 
 ```swift
 // Subscribe on main thread (for UI updates)
-eventBus.onMainThread(DataEvent.self) { event in
+CombineBus.shared.onMainThread(DataEvent.self) { event in
     // Update UI safely
 }
 
 // Subscribe on background thread (for heavy work)
-eventBus.onBackgroundThread(DataEvent.self) { event in
+CombineBus.shared.onBackgroundThread(DataEvent.self) { event in
     // Perform intensive operations
 }
 
 // Subscribe on current thread
-eventBus.onReceive(DataEvent.self) { event in
+CombineBus.shared.onReceive(DataEvent.self) { event in
     // Runs on whatever thread posted the event
 }
 ```
@@ -131,10 +131,10 @@ deinit {
 ### After (CombineBus)
 ```swift
 // Posting
-eventBus.post(UserLoggedInEvent(userId: userId))
+CombineBus.shared.post(UserLoggedInEvent(userId: userId))
 
 // Subscribing & handling (simple!)
-eventBus.onMainThread(UserLoggedInEvent.self) { event in
+CombineBus.shared.onMainThread(UserLoggedInEvent.self) { event in
     print(event.userId) // Direct access, no casting!
 }
 // Automatic cleanup!
@@ -148,26 +148,26 @@ CombineBus works with any DI system:
 
 ```swift
 // Step 1: Register with your DI container (e.g., in AppDelegate)
-container.register(EventBus.shared)
+container.register(CombineBus.shared)
 
 // Step 2: Use in your ViewModels/Services
 class AuthService {
-    @Inject private var eventBus: EventBus
+    @Inject private var bus: CombineBus
     
     func login() {
         // ... login logic ...
-        eventBus.post(UserLoggedInEvent(userId: "123"))
+        bus.post(UserLoggedInEvent(userId: "123"))
     }
 }
 
 // Step 3: Use in SwiftUI Views
 struct ProfileView: View {
-    @Inject private var eventBus: EventBus
+    @Inject private var bus: CombineBus
     @State private var username = "Guest"
     
     var body: some View {
         Text("Hello, \(username)")
-            .onEvent(UserLoggedInEvent.self, eventBus: eventBus) { event in
+            .onCombineBus(UserLoggedInEvent.self, bus: bus) { event in
                 username = "User \(event.userId)"
             }
     }
@@ -180,8 +180,93 @@ Note: `@Inject` is a placeholder for your DI property wrapper (e.g., `@AppInject
 
 ```swift
 // Create isolated event buses for different modules
-let authEventBus = EventBus()
-let dataEventBus = EventBus()
+let authEventBus = CombineBus()
+let dataEventBus = CombineBus()
+```
+
+### SwiftUI Thread Control
+
+```swift
+struct ContentView: View {
+    @State private var data = ""
+    
+    var body: some View {
+        Text(data)
+            // Process on background thread
+            .onCombineBus(
+                HeavyDataEvent.self, 
+                thread: .backgroundThread
+            ) { event in
+                // Perform heavy computation
+                let processed = processData(event.data)
+                DispatchQueue.main.async {
+                    data = processed
+                }
+            }
+            // UI updates on main thread (default)
+            .onCombineBus(UIUpdateEvent.self) { event in
+                data = event.message // Safe on main thread
+            }
+    }
+}
+```
+
+## Event Design Tips
+
+Events can be any type - structs, classes, enums, or even primitive types:
+
+```swift
+// Simple struct events (recommended)
+struct OrderPlaced {
+    let orderId: String
+    let amount: Decimal
+}
+
+// Enum events for state
+enum ConnectionState {
+    case connected
+    case disconnected
+    case error(Error)
+}
+
+// Even simple types work
+CombineBus.shared.post("simple_string_event")
+CombineBus.shared.post(42)
+
+// But structs provide better type safety and clarity
+```
+
+## Testing
+
+```swift
+import XCTest
+import CombineBus
+
+class MyTests: XCTestCase {
+    var bus: CombineBus!
+    var cancellables: Set<AnyCancellable>!
+    
+    override func setUp() {
+        super.setUp()
+        // Use isolated bus for testing
+        bus = CombineBus()
+        cancellables = []
+    }
+    
+    func testEventDelivery() {
+        let expectation = XCTestExpectation(description: "Event received")
+        
+        bus.onReceive(TestEvent.self) { event in
+            XCTAssertEqual(event.value, 42)
+            expectation.fulfill()
+        }
+        .store(in: &cancellables)
+        
+        bus.post(TestEvent(value: 42))
+        
+        wait(for: [expectation], timeout: 1.0)
+    }
+}
 ```
 
 ## Contributing
@@ -197,20 +282,6 @@ CombineBus is available under the MIT license. See the LICENSE file for more inf
 Created by [RC Rogers](https://github.com/rc-rogers)
 
 ---
-
-## Status
-
-🚧 **Under Development** - Core functionality complete, documentation in progress.
-
-## Roadmap
-
-- [x] Core event bus implementation
-- [x] Thread control (main/background)
-- [x] SwiftUI integration
-- [ ] Comprehensive test suite
-- [ ] Performance benchmarks
-- [ ] Example app
-- [ ] CocoaPods support (if requested)
 
 ## Support
 

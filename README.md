@@ -279,7 +279,7 @@ CombineBus is available under the MIT license. See the LICENSE file for more inf
 
 ## Author
 
-Created by [RC Rogers](https://github.com/rc-rogers)
+Created by [rc-rogers](https://github.com/rc-rogers)
 
 ---
 
